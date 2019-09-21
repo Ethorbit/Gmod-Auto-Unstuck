@@ -6,6 +6,8 @@ When a player is detected as being stuck, Auto Unstuck will wait a few seconds (
 ## Console Commands:
 AutoUnstuck_Enabled <0/1> 
 
+AutoUnstuck_TPNearSpot <0/1> (1 by default) - If on, Auto Unstuck will attempt to teleport the player to the closest spot that they got stuck at.
+
 AutoUnstuck_TPEntityClass <entity classname> (info_player_start by default ) - the entities' classname Auto Unstuck should pick randomly for players to teleport to when they are stuck
 
 AutoUnstuck_TimeForTP <seconds> (3 by default ) - The amount of seconds Auto Unstuck should wait for before teleporting the player
