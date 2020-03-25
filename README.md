@@ -3,6 +3,8 @@ Auto Unstuck is a server addon that detects whenever a player is stuck. It is ve
 
 When a player is detected as being stuck, Auto Unstuck will wait a few seconds (3 by default) warning the player first and will then teleport the player out.
 
+[![Video Preview](https://i.imgur.com/qEIRlmM.png)](https://www.youtube.com/watch?v=NA_v0GNkiCE "Auto Unstuck Preview")
+
 ## Console Commands:
 AutoUnstuck_Enabled <0/1> 
 
