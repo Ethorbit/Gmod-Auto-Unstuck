@@ -15,6 +15,8 @@ local EntToTPTo = CreateConVar("AutoUnstuck_TPEntityClass", "info_player_start",
 
 local TPSpots = {}
 
+AU_OriginalTPClass = ""
+
 cvars.AddChangeCallback("AutoUnstuck_Enabled", function()
     if ToggleAddon:GetInt() < 1 then 
         print("[AU] Auto Unstuck has been disabled")
@@ -44,6 +46,7 @@ local function AUAddEnts()
     local EntsWithTPClass = ents.FindByClass(TPClass)
 
     if table.Count(EntsWithTPClass) == 0 then -- If an entity with the classname from AutoUnstuck_TPEntityClass ConVar doesn't exist on the map
+        AU_OriginalTPClass = EntToTPTo:GetString()
         AddToTPSpots(ents.FindByClass("info_player_*")) 
         EntToTPTo:SetString("info_player_*") -- Just to show them their value was overwritten
         print("[AutoUnstuck] The specified entity classname from AutoUnstuck_TPEntityClass is either incorrect or none were found on the map! Using all info_player entities instead..")
@@ -244,12 +247,21 @@ local function AUPickTPSpot(ply)
     end
 end
 
-local function SetCollisionCheck(createdEnt)
+local function AU_EntWasCreated(createdEnt)
+    -- Continuously check for TPEntityClass's existence if it's created after server start:
+    if createdEnt:IsValid() then
+        if createdEnt:GetClass() == AU_OriginalTPClass and EntToTPTo:GetString() != AU_OriginalTPClass then 
+            print("[AutoUnstuck] The TPEntityClass entity just got created! Auto Unstuck will use this again.")
+            EntToTPTo:SetString(AU_OriginalTPClass)
+            AUAddEnts()
+        end
+    end
+
     if createdEnt:IsPlayer() then
         createdEnt:SetCustomCollisionCheck(true) -- Allow the player to be checked in the ShouldCollide hook
     end
 end
-hook.Add("OnEntityCreated", "AU_EntWasCreated", SetCollisionCheck)
+hook.Add("OnEntityCreated", "AU_EntWasCreated", AU_EntWasCreated)
 
 local function EntShouldCollide(ent1, ent2)   
     if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
