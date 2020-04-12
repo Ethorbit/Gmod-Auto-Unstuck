@@ -135,10 +135,12 @@ local function AnnounceTP(ply)
     end
 end
 
-local function InvalidTPSpot(ply)
-    ply:ChatPrint("[AU] Auto Unstuck failed to teleport you! (Invalid entity)")
+local AUPickTPSpot, AU_InvalidTPSpot -- Define at same time so they can call eachother
+function AU_InvalidTPSpot(ply)
+    -- ply:ChatPrint("[AU] Auto Unstuck failed to teleport you! (Invalid entity)")
     print("[AutoUnstuck] A TP spot was invalid! Adding entities to TPSpots again...") 
     AUAddEnts() 
+    AUPickTPSpot(ply) -- Don't let them just sit there being stuck
 end
 
 local TPdToSpot = Vector(0,0,0)
@@ -207,7 +209,7 @@ end
 local TpAwayFromNPCDelay = 0
 local function AUPickSpotAwayFromNPCs(ply) -- Used internally by AUPickTPSpot
     local RandomTPSpot = table.Random(TPSpots)  
-    if RandomTPSpot == nil then InvalidTPSpot(ply) return end -- If it ever did happen a stack overflow would occur
+    if RandomTPSpot == nil then AU_InvalidTPSpot(ply) return end -- If it ever did happen a stack overflow would occur
 
     TpAwayFromNPCDelay = CurTime() + 10 -- Big enough delay to stop teleportation spam
     local AvailableTPSpots = {} -- Spots that don't have NPCs near them
@@ -230,7 +232,7 @@ local function AUPickSpotAwayFromNPCs(ply) -- Used internally by AUPickTPSpot
     end
 end
 
-local function AUPickTPSpot(ply) 
+function AUPickTPSpot(ply) 
     if CurTime() < TpAwayFromNPCDelay then return end -- Only happens if AutoUnstuck_NearNPCs ConVar is on
     
     if TPNearStuckSpot:GetInt() > 0 and table.Count(navmesh.GetAllNavAreas()) > 1 then -- AutoUnstuck_TPNearSpot ConVar is on
@@ -263,22 +265,6 @@ local function AUPickTPSpot(ply)
             AUSendPlyToSpot(ply, RandomTPSpot)
         else
             AUPickSpotAwayFromNPCs(ply)
-            -- for i = 1,table.Count(TPSpots) do -- For each TP spot
-            --     if !SpotIsNearNPC(TPSpots[i]:GetPos()) then
-            --         table.insert(AvailableTPSpots, TPSpots[i])
-            --     end
-
-            --     if i == table.Count(TPSpots) then -- If all teleport spots have NPCs near them
-            --         if table.Count(AvailableTPSpots) > 0 then -- A spot(s) away from NPCs exists
-            --             AUSendPlyToSpot(ply, table.Random(AvailableTPSpots))
-            --             TpAwayFromNPCDelay = 0   
-            --         else
-            --             ply:ChatPrint("[AU] Tried to TP you to a spot away from NPCs, but there were none!")
-            --             AUSendPlyToSpot(ply, RandomTPSpot)    
-            --             TpAwayFromNPCDelay = 0  
-            --         end
-            --     end
-            -- end
         end
     end
 end
