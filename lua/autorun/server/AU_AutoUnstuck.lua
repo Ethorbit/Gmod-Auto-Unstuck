@@ -46,7 +46,10 @@ local function AUAddEnts()
     local EntsWithTPClass = ents.FindByClass(TPClass)
 
     if table.Count(EntsWithTPClass) == 0 then -- If an entity with the classname from AutoUnstuck_TPEntityClass ConVar doesn't exist on the map
-        AU_OriginalTPClass = EntToTPTo:GetString()
+        if AU_OriginalTPClass != "info_player_*" then
+            AU_OriginalTPClass = EntToTPTo:GetString()
+        end
+        
         AddToTPSpots(ents.FindByClass("info_player_*")) 
         EntToTPTo:SetString("info_player_*") -- Just to show them their value was overwritten
         print("[AutoUnstuck] The specified entity classname from AutoUnstuck_TPEntityClass is either incorrect or none were found on the map! Using all info_player entities instead..")
@@ -137,7 +140,6 @@ end
 
 local AUPickTPSpot, AU_InvalidTPSpot -- Define at same time so they can call eachother
 function AU_InvalidTPSpot(ply)
-    -- ply:ChatPrint("[AU] Auto Unstuck failed to teleport you! (Invalid entity)")
     print("[AutoUnstuck] A TP spot was invalid! Adding entities to TPSpots again...") 
     AUAddEnts() 
     AUPickTPSpot(ply) -- Don't let them just sit there being stuck
@@ -271,7 +273,7 @@ end
 local function AU_EntWasCreated(createdEnt)
     -- Continuously check for TPEntityClass's existence if it's created after server start:
     if createdEnt:IsValid() then
-        if createdEnt:GetClass() == AU_OriginalTPClass and EntToTPTo:GetString() != AU_OriginalTPClass then 
+        if string.lower(createdEnt:GetClass()) == string.lower(AU_OriginalTPClass) and string.lower(EntToTPTo:GetString()) != string.lower(AU_OriginalTPClass) then 
             print("[AutoUnstuck] The TPEntityClass entity just got created! Auto Unstuck will use this again.")
             EntToTPTo:SetString(AU_OriginalTPClass)
             AUAddEnts()
