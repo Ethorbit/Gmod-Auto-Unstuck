@@ -164,15 +164,11 @@ local function AUSendPlyToSpot(ply, spot)
 end
 
 local function CheckNavForEnts(ply, pos)
-    local size = Vector(1250, 1250, 1250)
-    local boxmins = pos - size
-    local boxmaxs = pos + size
-
     local NavTrace = {
         start = pos,
         endpos = pos,
-        maxs = Vector(100, 100, 100), 
-        mins = Vector(-100, -100, -100), 
+        maxs = Vector(30, 30, 30), 
+        mins = Vector(-30, -30, -30), 
         filter = ply, 
         collisiongroup = COLLISION_GROUP_PLAYER, -- Collides with stuff that players collide with
         ignoreworld = true -- The world will always be hit, but the player won't actually touch it
@@ -233,6 +229,9 @@ local function AUPickSpotAwayFromNPCs(ply) -- Used internally by AUPickTPSpot
 end
 
 function AUPickTPSpot(ply) 
+    local RandomTPSpot = table.Random(TPSpots)  
+    if RandomTPSpot == nil then AU_InvalidTPSpot(ply) return end -- If it ever did happen a stack overflow would occur
+    
     if CurTime() < TpAwayFromNPCDelay then return end -- Only happens if AutoUnstuck_NearNPCs ConVar is on
     
     if TPNearStuckSpot:GetInt() > 0 and table.Count(navmesh.GetAllNavAreas()) > 1 then -- AutoUnstuck_TPNearSpot ConVar is on
@@ -247,7 +246,7 @@ function AUPickTPSpot(ply)
                 AUPickSpotAwayFromNPCs(ply)  
             else if CheckNavForEnts(ply, ClosestNav:GetCenter()) then
                 ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
-                AUSendPlyToSpot(ply, RandomTPSpot)  
+                AUSendPlyToSpot(ply, RandomTPSpot)
             else
                 AUSendPlyToSpot(ply, ClosestNav:GetCenter())
             end
