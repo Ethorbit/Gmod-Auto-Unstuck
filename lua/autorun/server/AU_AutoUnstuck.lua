@@ -12,10 +12,24 @@ local NPCDisallowDist = CreateConVar("AutoUnstuck_NPC_Distance", 500, FCVAR_SERV
 local IgnorePlayers = CreateConVar("AutoUnstuck_IgnorePlayers", 0, FCVAR_SERVER_CAN_EXECUTE, "Ignore players getting stuck in other players (If not then players can force teleports on people by noclipping inside them)")
 local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_EXECUTE, "The time (in seconds) before the stuck player is teleported")
 local EntToTPTo = CreateConVar("AutoUnstuck_TPEntityClass", "info_player_start", FCVAR_SERVER_CAN_EXECUTE, "The entity classname to teleport the players to when they are stuck")
-
 local TPSpots = {}
+local AU_OriginalTPClass = ""
+local ExcludeSpawnerTime = 2 -- Amount of seconds to exclude Auto Unstuck for players who spawn
+local ExcludedPlayers = {} // Player Meta table was not working
 
-AU_OriginalTPClass = ""
+local function FirstPlayerSpawn()
+    if table.Count(TPSpots) > 0 then return end -- In TTT this hook was called more than once, so stop it if it does
+    AUAddEnts() 
+end
+hook.Add("PlayerInitialSpawn", "AU_PlySpwnedFirstTime", FirstPlayerSpawn)
+
+local function PlayerSpawned(ply)
+    table.insert(ExcludedPlayers, ply:EntIndex())
+    timer.Simple(ExcludeSpawnerTime, function()
+        table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
+    end)
+end
+hook.Add("PlayerSpawn", "AU_PlyHasSpawned", PlayerSpawned)
 
 cvars.AddChangeCallback("AutoUnstuck_Enabled", function()
     if ToggleAddon:GetInt() < 1 then 
@@ -68,12 +82,6 @@ local function RemoveFromTPList(ent) -- A necessity especially for TTT
 end
 hook.Add("EntityRemoved", "AU_EntWasRemoved", RemoveFromTPList)
 
-local function FirstPlayerSpawn()
-    if table.Count(TPSpots) > 0 then return end -- In TTT this hook was called more than once, so stop it if it does
-    AUAddEnts() 
-end
-hook.Add("PlayerInitialSpawn", "AU_PlySpwnedFirstTime", FirstPlayerSpawn)
-
 -- local function AnotherPlyClose(ply, boolean) -- Source engine is stupid and thinks clip brushes are the player themselves, so this needs to be done
 --     local entsNearPly = ents.FindInSphere(ply:GetPos(), 50)
 --     if entsNearPly == nil then return end
@@ -110,17 +118,19 @@ local function TraceBoundingBox(ply) -- Check if player is blocked using a trace
                 AUBlockOwnProp = ent:GetNWEntity("AUPropOwner") != ply
             end
 
+            if (ent:BoundingRadius() <= 60) then return end -- Stops triggering Auto Unstuck due to tiny entities
             if ent:GetCollisionGroup() != 20 and -- The ent can collide with the player that is stuck
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
         end
     }
-    
-    
+        
     return util.TraceHull(Trace).Hit
 end
 
 local function PlayerIsStuck(ply) 
+    if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
+
     if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
         if TraceBoundingBox(ply) then -- The player is blocked by something
             return true
