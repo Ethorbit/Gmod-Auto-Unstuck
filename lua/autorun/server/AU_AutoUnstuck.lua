@@ -17,12 +17,6 @@ local AU_OriginalTPClass = ""
 local ExcludeSpawnerTime = 2 -- Amount of seconds to exclude Auto Unstuck for players who spawn
 local ExcludedPlayers = {} // Player Meta table was not working
 
-local function FirstPlayerSpawn()
-    if table.Count(TPSpots) > 0 then return end -- In TTT this hook was called more than once, so stop it if it does
-    AUAddEnts() 
-end
-hook.Add("PlayerInitialSpawn", "AU_PlySpwnedFirstTime", FirstPlayerSpawn)
-
 local function PlayerSpawned(ply)
     table.insert(ExcludedPlayers, ply:EntIndex())
     timer.Simple(ExcludeSpawnerTime, function()
@@ -71,6 +65,12 @@ local function AUAddEnts()
         AddToTPSpots(EntsWithTPClass)
     end
 end
+
+local function FirstPlayerSpawn()
+    if table.Count(TPSpots) > 0 then return end -- In TTT this hook was called more than once, so stop it if it does
+    AUAddEnts() 
+end
+hook.Add("PlayerInitialSpawn", "AU_PlySpwnedFirstTime", FirstPlayerSpawn)
 
 cvars.AddChangeCallback("AutoUnstuck_TPEntityClass", function() 
     if EntToTPTo:GetString() == "info_player_*" then return end -- This is the class that is auto set if the AutoUnstuck_TPEntityClass doesn't exist
@@ -128,7 +128,21 @@ local function TraceBoundingBox(ply) -- Check if player is blocked using a trace
     return util.TraceHull(Trace).Hit
 end
 
+hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
+    table.insert(ExcludedPlayers, ply:EntIndex())
+
+    timer.Simple(2, function()
+        if !IsValid(ply) then return end
+        table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
+    end)
+end)
+
 local function PlayerIsStuck(ply) 
+    -- Don't teleport players for being stuck while they are down:
+    if gmod.GetGamemode().Name == "nZombies" then
+        if !ply:GetNotDowned() then return false end
+    end
+
     if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
 
     if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
