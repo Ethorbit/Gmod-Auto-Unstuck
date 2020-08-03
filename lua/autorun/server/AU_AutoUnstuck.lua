@@ -4,7 +4,7 @@
 -------------------------------------------------
 local ToggleAddon = CreateConVar("AutoUnstuck_Enabled", 1, FCVAR_SERVER_CAN_EXECUTE, "Enables/Disables the Auto Unstuck addon")
 local AnnounceTPs = CreateConVar("AutoUnstuck_Announce", 1, FCVAR_SERVER_CAN_EXECUTE, "Announce to everyone in the server if a player is teleported for being stuck")
-local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_CAN_EXECUTE, "Teleport players to the closest location that they got stuck at (Will not work if the map has no navigation mesh. Generate one with nav_generate)")
+local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_CAN_EXECUTE, "1: Teleport to closest navigation mesh, 2: Teleport to last saved player location")
 local TpIfOwnProps = CreateConVar("AutoUnstuck_If_PersonalEnt", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck if someone is stuck in their own stuff (If on, players can easily abuse it to teleport themselves)")
 local TpIfAdmin = CreateConVar("AutoUnstuck_If_Admin", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck even if the they are an administrator")
 local TPNearNPCs = CreateConVar("AutoUnstuck_NearNPCs", 1, FCVAR_SERVER_CAN_EXECUTE, "Automatically unstuck players at an AutoUnstuck_TPEntityClass spot that isn't near NPCs")
@@ -46,7 +46,7 @@ end
 local function AUAddEnts()
     TPSpots = {} 
 
-    if TPNearStuckSpot:GetInt() > 0 and table.Count(navmesh.GetAllNavAreas()) < 1 then
+    if TPNearStuckSpot:GetInt() == 1 and !navmesh.IsLoaded() then
         print("[AutoUnstuck] There is no navigation mesh on this map! Do nav_generate to generate the nav mesh, you only need to do it once per map! Using TPEntityClass entities instead..")
     end
 
@@ -82,28 +82,15 @@ local function RemoveFromTPList(ent) -- A necessity especially for TTT
 end
 hook.Add("EntityRemoved", "AU_EntWasRemoved", RemoveFromTPList)
 
--- local function AnotherPlyClose(ply, boolean) -- Source engine is stupid and thinks clip brushes are the player themselves, so this needs to be done
---     local entsNearPly = ents.FindInSphere(ply:GetPos(), 50)
---     if entsNearPly == nil then return end
-
---     local entsDetected = {}
---     for k,v in pairs(entsNearPly) do
---         if v:IsPlayer() and v != ply then 
---             table.insert(entsDetected, v)
---         end
---     end
-
---     return table.Count(entsDetected) > 0
--- end
-
-local function TraceBoundingBox(ply) -- Check if player is blocked using a trace based off player's Bounding Box (Supports all player sizes and models)
+local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a trace based off player's Bounding Box (Supports all player sizes and models)
     // Maxs and Mins equation that works with all player sizes (ply:GetModelBounds() would not be good enough):
     local Maxs = Vector(ply:OBBMaxs().X / ply:GetModelScale(), ply:OBBMaxs().Y / ply:GetModelScale(), ply:OBBMaxs().Z / ply:GetModelScale()) 
     local Mins = Vector(ply:OBBMins().X / ply:GetModelScale(), ply:OBBMins().Y / ply:GetModelScale(), ply:OBBMins().Z / ply:GetModelScale())
 
+    local thepos = pos != nil and pos or ply:GetPos()
     local Trace = {    
-        start = ply:GetPos(),
-        endpos = ply:GetPos(),
+        start = thepos,
+        endpos = thepos,
         maxs = Maxs, -- Exactly the size the player uses to collide with stuff
         mins = Mins, -- ^
         collisiongroup = COLLISION_GROUP_PLAYER, -- Collides with stuff that players collide with
@@ -128,19 +115,28 @@ local function TraceBoundingBox(ply) -- Check if player is blocked using a trace
     return util.TraceHull(Trace).Hit
 end
 
-hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
+local function ExcludePlayer(ply)
     table.insert(ExcludedPlayers, ply:EntIndex())
 
     timer.Simple(2, function()
         if !IsValid(ply) then return end
         table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
     end)
+end
+
+hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
+    ExcludePlayer(ply)
+end)
+
+hook.Add("NZAntiCheatMovedPlayer", "AUExcludeACTeleports", function(ply) -- My personal Anti-Cheat teleporter for nZombies
+    ExcludePlayer(ply)
 end)
 
 local function PlayerIsStuck(ply) 
     -- Don't teleport players for being stuck while they are down:
     if gmod.GetGamemode().Name == "nZombies" then
         if !ply:GetNotDowned() then return false end
+        --if ply:GetNWBool("in_afterlife") then return false end
     end
 
     if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
@@ -148,6 +144,9 @@ local function PlayerIsStuck(ply)
     if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
         if TraceBoundingBox(ply) then -- The player is blocked by something
             return true
+        else
+            ply.aulastspot = ply:GetPos() -- They aren't stuck, this is their new last position
+            ply.aulastspotang = ply:GetAngles()
         end
     end
 end
@@ -200,8 +199,6 @@ local function CheckNavForEnts(ply, pos)
         ignoreworld = true -- The world will always be hit, but the player won't actually touch it
     }
     
-    print(util.TraceHull(NavTrace).Entity)
-
     if util.TraceHull(NavTrace).Hit then
         local theTrace = util.TraceHull(NavTrace).Entity
         local traceClass = theTrace:GetClass()
@@ -254,33 +251,64 @@ local function AUPickSpotAwayFromNPCs(ply) -- Used internally by AUPickTPSpot
     end
 end
 
+local function GetAvailableNav(ply) -- Gets the closest navmesh that the player WILL NOT get stuck at
+    local newTbl = navmesh.GetAllNavAreas()
+    local navs = table.sort(newTbl, function(a, b) 
+        return a:GetCenter():DistToSqr(ply:GetPos()) < b:GetCenter():DistToSqr(ply:GetPos()) and !TraceBoundingBox(ply, a:GetCenter())
+    end)
+
+    return newTbl[1]:GetCenter()
+end
+
 function AUPickTPSpot(ply) 
     local RandomTPSpot = table.Random(TPSpots)  
     if RandomTPSpot == nil then AU_InvalidTPSpot(ply) return end -- If it ever did happen a stack overflow would occur
     
     if CurTime() < TpAwayFromNPCDelay then return end -- Only happens if AutoUnstuck_NearNPCs ConVar is on
     
-    if TPNearStuckSpot:GetInt() > 0 and table.Count(navmesh.GetAllNavAreas()) > 1 then -- AutoUnstuck_TPNearSpot ConVar is on
-        local ClosestNav = navmesh.GetNearestNavArea(ply:GetPos())
+    if TPNearStuckSpot:GetInt() == 1 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot set to TP to nearest navmesh
+        --local ClosestNav = navmesh.GetNearestNavArea(ply:GetPos(), true, 10000000, false, false)
+        ClosestNav = GetAvailableNav(ply)
 
-        if !ClosestNav:GetCenter() then
+        if !ClosestNav then
             AUSendPlyToSpot(ply, RandomTPSpot)  
             ply:ChatPrint("[AU] Auto Unstuck tried to teleport you to the closest spot, but there was no nav area close by!")  
         else
-            if SpotIsNearNPC(ClosestNav:GetCenter()) then
+            if SpotIsNearNPC(ClosestNav) then
                 ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
-            else if CheckNavForEnts(ply, ClosestNav:GetCenter()) then
+            else if CheckNavForEnts(ply, ClosestNav) then
                 ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
                 AUSendPlyToSpot(ply, RandomTPSpot)
             else
-                AUSendPlyToSpot(ply, ClosestNav:GetCenter())
+                AUSendPlyToSpot(ply, ClosestNav)
             end
         end   
     end  
     return end
 
-    if TPNearStuckSpot:GetInt() < 1 or TPNearStuckSpot:GetInt() > 0 and table.Count(navmesh.GetAllNavAreas()) < 1 then -- AutoUnstuck_TPNearSpot ConVar is off
+    if TPNearStuckSpot:GetInt() >= 2 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
+        if (isvector(ply.aulastspot)) then
+            if SpotIsNearNPC(ply.aulastspot) then
+                ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
+                AUPickSpotAwayFromNPCs(ply)  
+            elseif CheckNavForEnts(ply, ply.aulastspot) then
+                ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
+                AUSendPlyToSpot(ply, RandomTPSpot)
+            else
+                AUSendPlyToSpot(ply, ply.aulastspot)
+
+                if (isangle(ply.aulastspotang)) then
+                    ply:SetEyeAngles(ply.aulastspotang)
+                end
+            end
+        else
+            AUSendPlyToSpot(ply, RandomTPSpot)
+            ply:ChatPrint("[AU] Auto Unstuck tried to teleport you to your last saved location, but there isn't one saved!")
+        end
+    end
+
+    if TPNearStuckSpot:GetInt() <= 0 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot ConVar is off
         if table.Count(TPSpots) == 0 then -- This can happen if the lua file is reloaded at runtime
             AUAddEnts() 
             AUPickTPSpot(ply)
