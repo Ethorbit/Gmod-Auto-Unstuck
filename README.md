@@ -22,6 +22,8 @@ AutoUnstuck_If_Admin <0/1> (1 by default ) - If off, Auto Unstuck won't do anyth
 
 AutoUnstuck_NearNPCs <0/1> (1 by default)  - If off, Auto Unstuck will attempt to find a TP spot that is away from NPCs
 
+AutoUnstuck_NearEntities <0/1> (0 by default) - If on, Auto Unstuck will allow TPs near entities but has the possibility of teleporting a player inside of an entity
+
 AutoUnstuck_NPC_Distance <number> (500 by default) - The distance Auto Unstuck will try to avoid teleporting the player to (if AutoUnstuck_NearNPCs is set to 0)
   
   
