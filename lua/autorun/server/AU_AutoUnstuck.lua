@@ -8,6 +8,7 @@ local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_C
 local TpIfOwnProps = CreateConVar("AutoUnstuck_If_PersonalEnt", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck if someone is stuck in their own stuff (If on, players can easily abuse it to teleport themselves)")
 local TpIfAdmin = CreateConVar("AutoUnstuck_If_Admin", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck even if the they are an administrator")
 local TPNearNPCs = CreateConVar("AutoUnstuck_NearNPCs", 1, FCVAR_SERVER_CAN_EXECUTE, "Automatically unstuck players at an AutoUnstuck_TPEntityClass spot that isn't near NPCs")
+local TPNearEntities = CreateConVar("AutoUnstuck_NearEntities", 0, FCVAR_SERVER_CAN_EXECUTE, "Allow Auto Unstuck to teleport players near entities (Only a risk for player made props)")
 local NPCDisallowDist = CreateConVar("AutoUnstuck_NPC_Distance", 500, FCVAR_SERVER_CAN_EXECUTE, "Avoid teleporting players to an AutoUnstuck_TPEntityClass location if NPCs are this far away from them")
 local IgnorePlayers = CreateConVar("AutoUnstuck_IgnorePlayers", 0, FCVAR_SERVER_CAN_EXECUTE, "Ignore players getting stuck in other players (If not then players can force teleports on people by noclipping inside them)")
 local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_EXECUTE, "The time (in seconds) before the stuck player is teleported")
@@ -277,7 +278,7 @@ function AUPickTPSpot(ply)
             if SpotIsNearNPC(ClosestNav) then
                 ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
-            else if CheckNavForEnts(ply, ClosestNav) then
+            else if TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ClosestNav) then
                 ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
                 AUSendPlyToSpot(ply, RandomTPSpot)
             else
@@ -292,7 +293,7 @@ function AUPickTPSpot(ply)
             if SpotIsNearNPC(ply.aulastspot) then
                 ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
-            elseif CheckNavForEnts(ply, ply.aulastspot) then
+            elseif TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ply.aulastspot) then
                 ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
                 AUSendPlyToSpot(ply, RandomTPSpot)
             else
