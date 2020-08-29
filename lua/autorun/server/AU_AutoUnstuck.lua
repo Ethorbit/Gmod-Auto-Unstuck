@@ -8,7 +8,7 @@ local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_C
 local TpIfOwnProps = CreateConVar("AutoUnstuck_If_PersonalEnt", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck if someone is stuck in their own stuff (If on, players can easily abuse it to teleport themselves)")
 local TpIfAdmin = CreateConVar("AutoUnstuck_If_Admin", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck even if the they are an administrator")
 local TPNearNPCs = CreateConVar("AutoUnstuck_NearNPCs", 1, FCVAR_SERVER_CAN_EXECUTE, "Automatically unstuck players at an AutoUnstuck_TPEntityClass spot that isn't near NPCs")
-local TPNearEntities = CreateConVar("AutoUnstuck_NearEntities", 0, FCVAR_SERVER_CAN_EXECUTE, "Allow Auto Unstuck to teleport players near entities (Only a risk for player made props)")
+--local TPNearEntities = CreateConVar("AutoUnstuck_NearEntities", 0, FCVAR_SERVER_CAN_EXECUTE, "Allow Auto Unstuck to teleport players near entities (Only a risk for player made props)")
 local NPCDisallowDist = CreateConVar("AutoUnstuck_NPC_Distance", 500, FCVAR_SERVER_CAN_EXECUTE, "Avoid teleporting players to an AutoUnstuck_TPEntityClass location if NPCs are this far away from them")
 local IgnorePlayers = CreateConVar("AutoUnstuck_IgnorePlayers", 0, FCVAR_SERVER_CAN_EXECUTE, "Ignore players getting stuck in other players (If not then players can force teleports on people by noclipping inside them)")
 local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_EXECUTE, "The time (in seconds) before the stuck player is teleported")
@@ -87,7 +87,6 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
     // Maxs and Mins equation that works with all player sizes (ply:GetModelBounds() would not be good enough):
     local Maxs = Vector(ply:OBBMaxs().X / ply:GetModelScale(), ply:OBBMaxs().Y / ply:GetModelScale(), ply:OBBMaxs().Z / ply:GetModelScale()) 
     local Mins = Vector(ply:OBBMins().X / ply:GetModelScale(), ply:OBBMins().Y / ply:GetModelScale(), ply:OBBMins().Z / ply:GetModelScale())
-
     local thepos = pos != nil and pos or ply:GetPos()
     local Trace = {    
         start = thepos,
@@ -96,9 +95,9 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
         mins = Mins, -- ^
         collisiongroup = COLLISION_GROUP_PLAYER, -- Collides with stuff that players collide with
         filter = function(ent) -- Slow but necessary
-            --if ent == ply and ply:GetVelocity().z == -4.5 and !AnotherPlyClose(ply) then return true end -- Will make addon compatible with clip brushes again
+            if (ent == ply and ent:GetVelocity()[3] == -4.5) then return true end -- Will make the addon support clips again
             if IgnorePlayers:GetInt() > 0 and ent:IsPlayer() then return end -- The ent is a different player (AutoUnstuck_IgnorePlayers ConVar)
-
+            
             local AUBlockOwnProp = true
             if TpIfOwnProps:GetInt() > 0 then -- Allow player to get unstuck from their own entity (if AutoUnstuck_If_PersonalEnt ConVar is on)
                 AUBlockOwnProp = true
@@ -115,23 +114,6 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
         
     return util.TraceHull(Trace).Hit
 end
-
-local function ExcludePlayer(ply)
-    table.insert(ExcludedPlayers, ply:EntIndex())
-
-    timer.Simple(2, function()
-        if !IsValid(ply) then return end
-        table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
-    end)
-end
-
-hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
-    ExcludePlayer(ply)
-end)
-
-hook.Add("NZAntiCheatMovedPlayer", "AUExcludeACTeleports", function(ply) -- My personal Anti-Cheat teleporter for nZombies
-    ExcludePlayer(ply)
-end)
 
 local function PlayerIsStuck(ply) 
     -- Don't teleport players for being stuck while they are down:
@@ -152,6 +134,45 @@ local function PlayerIsStuck(ply)
     end
 end
 
+local AUPickTPSpot, AU_InvalidTPSpot -- Define at same time so they can call eachother
+function AU_InvalidTPSpot(ply)
+    print("[AutoUnstuck] A TP spot was invalid! Adding entities to TPSpots again...") 
+    AUAddEnts() 
+    AUPickTPSpot(ply) -- Don't let them just sit there being stuck
+end
+
+local function CheckIfStuck(ply)
+    if PlayerIsStuck(ply) then
+        local TimerName = string.format("AU_Tp%s", ply:UserID()) 
+        if timer.Exists(TimerName) then return end
+        ply:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
+        
+        timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
+            if !ply:IsValid() then return end -- It's possible they could've left the server before the timer finished
+            if PlayerIsStuck(ply) then 
+                AUPickTPSpot(ply) 
+            end               
+        end)          
+    end   
+end
+
+local function ExcludePlayer(ply)
+    table.insert(ExcludedPlayers, ply:EntIndex())
+    timer.Simple(1, function()
+        if !IsValid(ply) then return end
+        table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
+        CheckIfStuck(ply)
+    end)
+end
+
+hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
+    ExcludePlayer(ply)
+end)
+
+hook.Add("NZAntiCheatMovedPlayer", "AUExcludeACTeleports", function(ply) -- My personal Anti-Cheat teleporter for nZombies
+    ExcludePlayer(ply)
+end)
+
 local function AnnounceTP(ply)
     if AnnounceTPs:GetInt() < 1 then return end -- AutoUnstuck_Announce ConVar
     local AnnounceString = string.format("[AU] %s %s", ply:Nick(), "was teleported because they were stuck!")
@@ -160,13 +181,6 @@ local function AnnounceTP(ply)
             v:ChatPrint(AnnounceString)
         end
     end
-end
-
-local AUPickTPSpot, AU_InvalidTPSpot -- Define at same time so they can call eachother
-function AU_InvalidTPSpot(ply)
-    print("[AutoUnstuck] A TP spot was invalid! Adding entities to TPSpots again...") 
-    AUAddEnts() 
-    AUPickTPSpot(ply) -- Don't let them just sit there being stuck
 end
 
 local TPdToSpot = Vector(0,0,0)
@@ -187,6 +201,15 @@ local function AUSendPlyToSpot(ply, spot)
     ply:SetEyeAngles(Angle(0,0,0)) -- Reset their view angles
     ply:ChatPrint("[AU] Auto Unstuck has teleported you out.")
     AnnounceTP(ply)
+
+    if gmod.GetGamemode().Name == "nZombies" then 
+        ply:SetTargetPriority(TARGET_PRIORITY_NONE)
+        timer.Simple(5, function()
+            if (IsValid(ply)) then
+                ply:SetTargetPriority(TARGET_PRIORITY_PLAYER)
+            end
+        end)
+    end
 end
 
 local function CheckNavForEnts(ply, pos)
@@ -278,24 +301,28 @@ function AUPickTPSpot(ply)
             if SpotIsNearNPC(ClosestNav) then
                 ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
-            else if TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ClosestNav) then
-                ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
-                AUSendPlyToSpot(ply, RandomTPSpot)
+            -- else if TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ClosestNav) then
+            --     ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
+            --     AUSendPlyToSpot(ply, RandomTPSpot)
             else
                 AUSendPlyToSpot(ply, ClosestNav)
             end
-        end   
+        --end   
     end  
     return end
 
     if TPNearStuckSpot:GetInt() >= 2 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
         if (isvector(ply.aulastspot)) then
+            if (ply:GetPos():Distance(ply.aulastspot) <= 50) then 
+                AUSendPlyToSpot(ply, RandomTPSpot)
+            return end
+
             if SpotIsNearNPC(ply.aulastspot) then
                 ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
-            elseif TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ply.aulastspot) then
-                ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
-                AUSendPlyToSpot(ply, RandomTPSpot)
+            -- elseif TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ply.aulastspot) then
+            --     ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
+            --     AUSendPlyToSpot(ply, RandomTPSpot)
             else
                 AUSendPlyToSpot(ply, ply.aulastspot)
 
@@ -357,17 +384,18 @@ local function EntShouldCollide(ent1, ent2)
         end
 
         if ent1:GetVelocity().x == 0 and ent2:GetVelocity().x == 0 then -- Both entities are not moving
-            if PlayerIsStuck(ent1) then
-                if timer.Exists(TimerName) then return end
-                ent1:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
+            CheckIfStuck(ent1)
+            -- if PlayerIsStuck(ent1) then
+            --     if timer.Exists(TimerName) then return end
+            --     ent1:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
                 
-                timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
-                    if !ent1:IsValid() then return end -- It's possible they could've left the server before the timer finished
-                    if PlayerIsStuck(ent1) then 
-                        AUPickTPSpot(ent1) 
-                    end               
-                end)          
-            end   
+            --     timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
+            --         if !ent1:IsValid() then return end -- It's possible they could've left the server before the timer finished
+            --         if PlayerIsStuck(ent1) then 
+            --             AUPickTPSpot(ent1) 
+            --         end               
+            --     end)          
+            -- end   
         end
     end
 end
