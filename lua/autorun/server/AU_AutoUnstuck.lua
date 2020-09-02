@@ -88,14 +88,13 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
     local Maxs = Vector(ply:OBBMaxs().X / ply:GetModelScale(), ply:OBBMaxs().Y / ply:GetModelScale(), ply:OBBMaxs().Z / ply:GetModelScale()) 
     local Mins = Vector(ply:OBBMins().X / ply:GetModelScale(), ply:OBBMins().Y / ply:GetModelScale(), ply:OBBMins().Z / ply:GetModelScale())
     local thepos = pos != nil and pos or ply:GetPos()
-    local Trace = {    
+    local tr = util.TraceHull({    
         start = thepos,
         endpos = thepos,
         maxs = Maxs, -- Exactly the size the player uses to collide with stuff
         mins = Mins, -- ^
         collisiongroup = COLLISION_GROUP_PLAYER, -- Collides with stuff that players collide with
         filter = function(ent) -- Slow but necessary
-            if (ent == ply and ent:GetVelocity()[3] == -4.5) then return true end -- Will make the addon support clips again
             if IgnorePlayers:GetInt() > 0 and ent:IsPlayer() then return end -- The ent is a different player (AutoUnstuck_IgnorePlayers ConVar)
             
             local AUBlockOwnProp = true
@@ -110,9 +109,9 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
         end
-    }
-        
-    return util.TraceHull(Trace).Hit
+    })
+    
+    return tr.Hit
 end
 
 local function PlayerIsStuck(ply) 
@@ -127,7 +126,7 @@ local function PlayerIsStuck(ply)
     if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
         if TraceBoundingBox(ply) then -- The player is blocked by something
             return true
-        else
+        elseif (ply:IsOnGround()) then      
             ply.aulastspot = ply:GetPos() -- They aren't stuck, this is their new last position
             ply.aulastspotang = ply:GetAngles()
         end
