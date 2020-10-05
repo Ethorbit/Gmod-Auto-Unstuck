@@ -15,12 +15,11 @@ local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_E
 local EntToTPTo = CreateConVar("AutoUnstuck_TPEntityClass", "info_player_start", FCVAR_SERVER_CAN_EXECUTE, "The entity classname to teleport the players to when they are stuck")
 local TPSpots = {}
 local AU_OriginalTPClass = ""
-local ExcludeSpawnerTime = 2 -- Amount of seconds to exclude Auto Unstuck for players who spawn
-local ExcludedPlayers = {} // Player Meta table was not working
+local ExcludedPlayers = {}
 
 local function PlayerSpawned(ply)
     table.insert(ExcludedPlayers, ply:EntIndex())
-    timer.Simple(ExcludeSpawnerTime, function()
+    timer.Simple(2, function()
         table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
     end)
 end
@@ -28,9 +27,9 @@ hook.Add("PlayerSpawn", "AU_PlyHasSpawned", PlayerSpawned)
 
 cvars.AddChangeCallback("AutoUnstuck_Enabled", function()
     if ToggleAddon:GetInt() < 1 then 
-        print("[AU] Auto Unstuck has been disabled")
+        print("[Auto Unstuck] has been disabled")
     else
-        print("[AU] Auto Unstuck has been enabled")
+        print("[Auto Unstuck] has been enabled")
     end
 end)
 
@@ -48,7 +47,7 @@ local function AUAddEnts()
     TPSpots = {} 
 
     if TPNearStuckSpot:GetInt() == 1 and !navmesh.IsLoaded() then
-        print("[AutoUnstuck] There is no navigation mesh on this map! Do nav_generate to generate the nav mesh, you only need to do it once per map! Using TPEntityClass entities instead..")
+        print("[Auto Unstuck] There is no navigation mesh on this map! Do nav_generate to generate the nav mesh, you only need to do it once per map! Using TPEntityClass entities instead..")
     end
 
     local TPClass = EntToTPTo:GetString() -- The AutoUnstuck_TPEntityClass ConVar
@@ -61,7 +60,7 @@ local function AUAddEnts()
         
         AddToTPSpots(ents.FindByClass("info_player_*")) 
         EntToTPTo:SetString("info_player_*") -- Just to show them their value was overwritten
-        print("[AutoUnstuck] The specified entity classname from AutoUnstuck_TPEntityClass is either incorrect or none were found on the map! Using all info_player entities instead..")
+        print("[Auto Unstuck] The specified entity classname from AutoUnstuck_TPEntityClass is either incorrect or none were found on the map! Using all info_player entities instead..")
     else -- Using navs instead
         AddToTPSpots(EntsWithTPClass)
     end
@@ -105,7 +104,7 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
                 AUBlockOwnProp = ent:GetNWEntity("AUPropOwner") != ply
             end
 
-            if (ent:BoundingRadius() <= 60) then return end -- Stops triggering Auto Unstuck due to tiny entities
+            if (ent:BoundingRadius() <= 10) then return end -- Stops triggering Auto Unstuck due to tiny entities
             if ent:GetCollisionGroup() != 20 and -- The ent can collide with the player that is stuck
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
@@ -118,6 +117,7 @@ end
 local function PlayerIsStuck(ply) 
     -- Don't teleport players for being stuck while they are down:
     if gmod.GetGamemode().Name == "nZombies" then
+        if ply:IsSpectating() then return false end
         if !ply:GetNotDowned() then return false end
         --if ply:GetNWBool("in_afterlife") then return false end
     end
@@ -145,7 +145,8 @@ local function CheckIfStuck(ply)
     if PlayerIsStuck(ply) then
         local TimerName = string.format("AU_Tp%s", ply:UserID()) 
         if timer.Exists(TimerName) then return end
-        ply:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
+        ply.LastAutoUnstuck = CurTime()
+        ply:ChatPrint("[Auto Unstuck] has determined you're stuck, try moving...")                        
         
         timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
             if !ply:IsValid() then return end -- It's possible they could've left the server before the timer finished
@@ -157,13 +158,24 @@ local function CheckIfStuck(ply)
 end
 
 local function ExcludePlayer(ply)
-    table.insert(ExcludedPlayers, ply:EntIndex())
-    timer.Simple(1, function()
-        if !IsValid(ply) then return end
-        table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
-        CheckIfStuck(ply)
-    end)
+    if (IsValid(ply)) then
+        table.insert(ExcludedPlayers, ply:EntIndex())
+        timer.Simple(2, function()
+            if !IsValid(ply) then return end
+            table.RemoveByValue(ExcludedPlayers, ply:EntIndex())
+            CheckIfStuck(ply)
+        end)
+    end
 end
+
+hook.Add("PlayerDowned", "AUExcludeWhosWho", function(ply) -- Exclude when spawned from Who's Who
+    if (!IsValid(ply) or IsValid(ply) and !ply:IsPlayer()) then return end
+    timer.Simple(5.1, function()
+        if (IsValid(ply) and IsValid(ply.WhosWhoClone)) then
+            ExcludePlayer(ply)
+        end
+    end)
+end)
 
 hook.Add("PlayerRevived", "AUExcludeRevivedPlys", function(ply) -- Exclude revived players to avoid unnecessary unstuck
     ExcludePlayer(ply)
@@ -175,7 +187,7 @@ end)
 
 local function AnnounceTP(ply)
     if AnnounceTPs:GetInt() < 1 then return end -- AutoUnstuck_Announce ConVar
-    local AnnounceString = string.format("[AU] %s %s", ply:Nick(), "was teleported because they were stuck!")
+    local AnnounceString = string.format("[Auto Unstuck] %s %s", ply:Nick(), "was teleported because they were stuck!")
     for k,v in pairs(player.GetAll()) do
         if v != ply then  -- Don't announce to the player that was teleported  
             v:ChatPrint(AnnounceString)
@@ -188,7 +200,7 @@ local function AUSendPlyToSpot(ply, spot)
     local pos = 0
 
     if !ply:IsValid() then return end
-    if !ply:Alive() then ply:ChatPrint("[AU] Teleport aborted.") return end
+    if !ply:Alive() then ply:ChatPrint("[Auto Unstuck] Teleport aborted.") return end
 
     if isvector(spot) then -- If AutoUnstuck_TPNearSpot ConVar is on then it gets nearest nav which is a position not an entity
         pos = spot
@@ -199,7 +211,7 @@ local function AUSendPlyToSpot(ply, spot)
     TPdToSpot = pos + Vector(0,0,2)
     ply:SetPos(pos + Vector(0,0,2)) -- up 2 on the z axis to fix spawning a tiny bit in the ground (map maker's fault)
     ply:SetEyeAngles(Angle(0,0,0)) -- Reset their view angles
-    ply:ChatPrint("[AU] Auto Unstuck has teleported you out.")
+    ply:ChatPrint("[Auto Unstuck] has teleported you out.")
     AnnounceTP(ply)
 
     if gmod.GetGamemode().Name == "nZombies" then 
@@ -267,7 +279,7 @@ local function AUPickSpotAwayFromNPCs(ply) -- Used internally by AUPickTPSpot
                 AUSendPlyToSpot(ply, table.Random(AvailableTPSpots))
                 TpAwayFromNPCDelay = 0   
             else
-                ply:ChatPrint("[AU] Tried to TP you to a spot away from NPCs, but there were none!")
+                ply:ChatPrint("[Auto Unstuck] Tried to TP you to a spot away from NPCs, but there were none!")
                 AUSendPlyToSpot(ply, RandomTPSpot)    
                 TpAwayFromNPCDelay = 0  
             end
@@ -296,10 +308,10 @@ function AUPickTPSpot(ply)
 
         if !ClosestNav then
             AUSendPlyToSpot(ply, RandomTPSpot)  
-            ply:ChatPrint("[AU] Auto Unstuck tried to teleport you to the closest spot, but there was no nav area close by!")  
+            ply:ChatPrint("[Auto Unstuck] tried to teleport you to the closest spot, but there was no nav area close by!")  
         else
             if SpotIsNearNPC(ClosestNav) then
-                ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
+                ply:ChatPrint("[Auto Unstuck] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
             -- else if TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ClosestNav) then
             --     ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
@@ -318,7 +330,7 @@ function AUPickTPSpot(ply)
             return end
 
             if SpotIsNearNPC(ply.aulastspot) then
-                ply:ChatPrint("[AU] An NPC is too close to the nearby spot, teleporting elsewhere!")
+                ply:ChatPrint("[Auto Unstuck] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
             -- elseif TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ply.aulastspot) then
             --     ply:ChatPrint("[AU] An entity is too close to the nearby spot, teleporting elsewhere!")
@@ -332,7 +344,7 @@ function AUPickTPSpot(ply)
             end
         else
             AUSendPlyToSpot(ply, RandomTPSpot)
-            ply:ChatPrint("[AU] Auto Unstuck tried to teleport you to your last saved location, but there isn't one saved!")
+            ply:ChatPrint("[Auto Unstuck] tried to teleport you to your last saved location, but there isn't one saved!")
         end
     end
 
@@ -354,7 +366,7 @@ local function AU_EntWasCreated(createdEnt)
     -- Continuously check for TPEntityClass's existence if it's created after server start:
     if createdEnt:IsValid() then
         if string.lower(createdEnt:GetClass()) == string.lower(AU_OriginalTPClass) and string.lower(EntToTPTo:GetString()) != string.lower(AU_OriginalTPClass) then 
-            print("[AutoUnstuck] The TPEntityClass entity just got created! Auto Unstuck will use this again.")
+            print("[Auto Unstuck] The TPEntityClass entity just got created! Auto Unstuck will use this again.")
             EntToTPTo:SetString(AU_OriginalTPClass)
             AUAddEnts()
         end
@@ -366,40 +378,65 @@ local function AU_EntWasCreated(createdEnt)
 end
 hook.Add("OnEntityCreated", "AU_EntWasCreated", AU_EntWasCreated)
 
-local function EntShouldCollide(ent1, ent2)   
-    if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
-    if !ent1:IsValid() then return end
-    if !ent2:IsValid() and !ent2:IsWorld() then return end 
-    if TpIfAdmin:GetInt() < 1 and ent1:IsAdmin() then return end -- Stop admins from being tp'd for being stuck (If AutoUnstuck_If_Admin is off)    
+-- local function EntShouldCollide(ent1, ent2)  
+--     if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
+--     if !ent1:IsValid() then return end
+--     if !ent2:IsValid() and !ent2:IsWorld() then return end 
+--     if TpIfAdmin:GetInt() < 1 and ent1:IsAdmin() then return end -- Stop admins from being tp'd for being stuck (If AutoUnstuck_If_Admin is off)    
     
-    if ent1:IsPlayer() and ent1:Alive() and ent1:GetVehicle() == NULL then 
-        if ent1.jail then return end -- Player is ULX Jailed, if stuck in jail it would cause a teleportation loop spamming chat
+--     if ent1:IsPlayer() and ent1:Alive() and ent1:GetVehicle() == NULL then 
+--         if ent1.jail then return end -- Player is ULX Jailed, if stuck in jail it would cause a teleportation loop spamming chat
 
-        local TimerName = string.format("AU_Tp%s", ent1:UserID()) 
+--         local TimerName = string.format("AU_Tp%s", ent1:UserID()) 
  
-        if !PlayerIsStuck(ent1) and timer.Exists(TimerName) then -- Make sure to remove their timer if they aren't stuck anymore   
-            if TPdToSpot == ent1:GetPos() then return end -- They aren't stuck anymore BECAUSE Auto Unstuck teleported them
-            timer.Remove(TimerName)
-            ent1:ChatPrint("[AU] You are no longer determined to be stuck.")
-        end
+--         if !PlayerIsStuck(ent1) and timer.Exists(TimerName) then -- Make sure to remove their timer if they aren't stuck anymore   
+--             if TPdToSpot == ent1:GetPos() then return end -- They aren't stuck anymore BECAUSE Auto Unstuck teleported them
+--             timer.Remove(TimerName)
+--             ent1:ChatPrint("[Auto Unstuck] You are no longer determined to be stuck.")
+--         end
 
-        if ent1:GetVelocity().x == 0 and ent2:GetVelocity().x == 0 then -- Both entities are not moving
-            CheckIfStuck(ent1)
-            -- if PlayerIsStuck(ent1) then
-            --     if timer.Exists(TimerName) then return end
-            --     ent1:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
+--         if ent1:GetVelocity().x == 0 and ent2:GetVelocity().x == 0 then -- Both entities are not moving
+--             CheckIfStuck(ent1)
+--             -- if PlayerIsStuck(ent1) then
+--             --     if timer.Exists(TimerName) then return end
+--             --     ent1:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
                 
-            --     timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
-            --         if !ent1:IsValid() then return end -- It's possible they could've left the server before the timer finished
-            --         if PlayerIsStuck(ent1) then 
-            --             AUPickTPSpot(ent1) 
-            --         end               
-            --     end)          
-            -- end   
+--             --     timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
+--             --         if !ent1:IsValid() then return end -- It's possible they could've left the server before the timer finished
+--             --         if PlayerIsStuck(ent1) then 
+--             --             AUPickTPSpot(ent1) 
+--             --         end               
+--             --     end)          
+--             -- end   
+--         end
+--     end
+-- end
+-- hook.Add("ShouldCollide", "AU_EntityIsColliding", EntShouldCollide)
+
+hook.Add("Think", "AU_FindStuckPlayers", function()
+    for _,v in pairs(player.GetAll()) do
+        if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
+        if !v:IsValid() then return end
+        if TpIfAdmin:GetInt() < 1 and v:IsAdmin() then return end -- Stop admins from being tp'd for being stuck (If AutoUnstuck_If_Admin is off)    
+        
+        if v:IsPlayer() and v:Alive() and v:GetVehicle() == NULL then 
+            if v.jail then return end -- Player is ULX Jailed, if stuck in jail it would cause a teleportation loop spamming chat
+    
+            local TimerName = string.format("AU_Tp%s", v:UserID()) 
+     
+            if !PlayerIsStuck(v) and timer.Exists(TimerName) then -- Make sure to remove their timer if they aren't stuck anymore   
+                if TPdToSpot == v:GetPos() then return end -- They aren't stuck anymore BECAUSE Auto Unstuck teleported them
+                timer.Remove(TimerName)
+                v:ChatPrint("[Auto Unstuck] You are no longer determined to be stuck.")
+            end
+    
+            if v:GetVelocity().x == 0 then -- Both entities are not moving
+                CheckIfStuck(v)
+            end
         end
     end
-end
-hook.Add("ShouldCollide", "AU_EntityIsColliding", EntShouldCollide)
+end)
+
 
 local function MakeEntOwnership(ply, model, spawnedEnt)
     if !spawnedEnt:IsValid() then return end
