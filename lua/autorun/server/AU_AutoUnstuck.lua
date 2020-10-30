@@ -248,6 +248,8 @@ local function CheckNavForEnts(ply, pos)
 end
 
 local function SpotIsNearNPC(spot)
+    if (TPNearNPCs:GetInt() >= 1) then return false end
+    
     local npcNear = false
     local EntsNearSpot = ents.FindInSphere(spot, NPCDisallowDist:GetInt()) -- Check each TP spot for NPCs
 
@@ -310,7 +312,7 @@ function AUPickTPSpot(ply)
             AUSendPlyToSpot(ply, RandomTPSpot)  
             ply:ChatPrint("[Auto Unstuck] tried to teleport you to the closest spot, but there was no nav area close by!")  
         else
-            if SpotIsNearNPC(ClosestNav) then
+            if TPNearNPCs:GetInt() < 1 and SpotIsNearNPC(ClosestNav) then
                 ply:ChatPrint("[Auto Unstuck] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
             -- else if TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ClosestNav) then
@@ -323,13 +325,13 @@ function AUPickTPSpot(ply)
     end  
     return end
 
-    if TPNearStuckSpot:GetInt() >= 2 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
+    if TPNearStuckSpot:GetInt() >= 2 then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
         if (isvector(ply.aulastspot)) then
-            if (ply:GetPos():Distance(ply.aulastspot) <= 50) then 
+            if (TraceBoundingBox(ply, ply.aulastspot)) then  --ply:GetPos():Distance(ply.aulastspot) <= 50
                 AUSendPlyToSpot(ply, RandomTPSpot)
             return end
 
-            if SpotIsNearNPC(ply.aulastspot) then
+            if TPNearNPCs:GetInt() < 1 and SpotIsNearNPC(ply.aulastspot) then
                 ply:ChatPrint("[Auto Unstuck] An NPC is too close to the nearby spot, teleporting elsewhere!")
                 AUPickSpotAwayFromNPCs(ply)  
             -- elseif TPNearEntities:GetInt() == 0 and CheckNavForEnts(ply, ply.aulastspot) then
