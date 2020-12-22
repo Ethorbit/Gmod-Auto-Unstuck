@@ -93,6 +93,7 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
         maxs = Maxs, -- Exactly the size the player uses to collide with stuff
         mins = Mins, -- ^
         collisiongroup = COLLISION_GROUP_PLAYER, -- Collides with stuff that players collide with
+        mask = MASK_PLAYERSOLID, -- Detects things like map clips
         filter = function(ent) -- Slow but necessary
             if IgnorePlayers:GetInt() > 0 and ent:IsPlayer() then return end -- The ent is a different player (AutoUnstuck_IgnorePlayers ConVar)
             if ent:IsNPC() or ent.Type == "nextbot" then return true end
@@ -102,15 +103,15 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
                 AUBlockOwnProp = true
             else           
                 AUBlockOwnProp = ent:GetNWEntity("AUPropOwner") != ply
-            end
+            end 
 
-            if (ent:BoundingRadius() <= 10) then return end -- Stops triggering Auto Unstuck due to tiny entities
+            if (ent:IsScripted() and ent:BoundingRadius() <= 20) then return end -- Stops triggering Auto Unstuck due to tiny entities
             if ent:GetCollisionGroup() != 20 and -- The ent can collide with the player that is stuck
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
         end
     })
-    
+
     return tr.Hit
 end
 
