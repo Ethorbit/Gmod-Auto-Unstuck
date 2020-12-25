@@ -104,8 +104,8 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
             else           
                 AUBlockOwnProp = ent:GetNWEntity("AUPropOwner") != ply
             end 
-
-            if (ent:IsScripted() and ent:BoundingRadius() <= 20) then return end -- Stops triggering Auto Unstuck due to tiny entities
+            
+            if (ent:IsScripted() and ply:BoundingRadius() - ent:BoundingRadius() > 0) then return end -- Stops triggering Auto Unstuck due to tiny entities
             if ent:GetCollisionGroup() != 20 and -- The ent can collide with the player that is stuck
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
@@ -381,42 +381,7 @@ local function AU_EntWasCreated(createdEnt)
 end
 hook.Add("OnEntityCreated", "AU_EntWasCreated", AU_EntWasCreated)
 
--- local function EntShouldCollide(ent1, ent2)  
---     if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
---     if !ent1:IsValid() then return end
---     if !ent2:IsValid() and !ent2:IsWorld() then return end 
---     if TpIfAdmin:GetInt() < 1 and ent1:IsAdmin() then return end -- Stop admins from being tp'd for being stuck (If AutoUnstuck_If_Admin is off)    
-    
---     if ent1:IsPlayer() and ent1:Alive() and ent1:GetVehicle() == NULL then 
---         if ent1.jail then return end -- Player is ULX Jailed, if stuck in jail it would cause a teleportation loop spamming chat
-
---         local TimerName = string.format("AU_Tp%s", ent1:UserID()) 
- 
---         if !PlayerIsStuck(ent1) and timer.Exists(TimerName) then -- Make sure to remove their timer if they aren't stuck anymore   
---             if TPdToSpot == ent1:GetPos() then return end -- They aren't stuck anymore BECAUSE Auto Unstuck teleported them
---             timer.Remove(TimerName)
---             ent1:ChatPrint("[Auto Unstuck] You are no longer determined to be stuck.")
---         end
-
---         if ent1:GetVelocity().x == 0 and ent2:GetVelocity().x == 0 then -- Both entities are not moving
---             CheckIfStuck(ent1)
---             -- if PlayerIsStuck(ent1) then
---             --     if timer.Exists(TimerName) then return end
---             --     ent1:ChatPrint("[AU] Auto Unstuck has determined you're stuck, try moving...")                        
-                
---             --     timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
---             --         if !ent1:IsValid() then return end -- It's possible they could've left the server before the timer finished
---             --         if PlayerIsStuck(ent1) then 
---             --             AUPickTPSpot(ent1) 
---             --         end               
---             --     end)          
---             -- end   
---         end
---     end
--- end
--- hook.Add("ShouldCollide", "AU_EntityIsColliding", EntShouldCollide)
-
-hook.Add("Think", "AU_FindStuckPlayers", function()
+hook.Add("Tick", "AU_FindStuckPlayers", function()
     for _,v in pairs(player.GetAll()) do
         if ToggleAddon:GetInt() < 1 then return end -- AutoUnstuck_Enabled ConVar
         if !v:IsValid() then return end
@@ -433,13 +398,12 @@ hook.Add("Think", "AU_FindStuckPlayers", function()
                 v:ChatPrint("[Auto Unstuck] You are no longer determined to be stuck.")
             end
     
-            if v:GetVelocity().x == 0 then -- Both entities are not moving
-                CheckIfStuck(v)
-            end
+            --if v:GetVelocity().x == 0 then -- Both entities are not moving
+            CheckIfStuck(v)
+           -- end
         end
     end
 end)
-
 
 local function MakeEntOwnership(ply, model, spawnedEnt)
     if !spawnedEnt:IsValid() then return end
