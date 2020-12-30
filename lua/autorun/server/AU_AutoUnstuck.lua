@@ -8,7 +8,6 @@ local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_C
 local TpIfOwnProps = CreateConVar("AutoUnstuck_If_PersonalEnt", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck if someone is stuck in their own stuff (If on, players can easily abuse it to teleport themselves)")
 local TpIfAdmin = CreateConVar("AutoUnstuck_If_Admin", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck even if the they are an administrator")
 local TPNearNPCs = CreateConVar("AutoUnstuck_NearNPCs", 1, FCVAR_SERVER_CAN_EXECUTE, "Automatically unstuck players at an AutoUnstuck_TPEntityClass spot that isn't near NPCs")
---local TPNearEntities = CreateConVar("AutoUnstuck_NearEntities", 0, FCVAR_SERVER_CAN_EXECUTE, "Allow Auto Unstuck to teleport players near entities (Only a risk for player made props)")
 local NPCDisallowDist = CreateConVar("AutoUnstuck_NPC_Distance", 500, FCVAR_SERVER_CAN_EXECUTE, "Avoid teleporting players to an AutoUnstuck_TPEntityClass location if NPCs are this far away from them")
 local IgnorePlayers = CreateConVar("AutoUnstuck_IgnorePlayers", 0, FCVAR_SERVER_CAN_EXECUTE, "Ignore players getting stuck in other players (If not then players can force teleports on people by noclipping inside them)")
 local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_EXECUTE, "The time (in seconds) before the stuck player is teleported")
@@ -16,6 +15,15 @@ local EntToTPTo = CreateConVar("AutoUnstuck_TPEntityClass", "info_player_start",
 local TPSpots = {}
 local AU_OriginalTPClass = ""
 local ExcludedPlayers = {}
+
+-- Special ConVar for nZombies server owners using Linux, I'm unsure if
+-- it was just my server with invis_wall collision problems, so use with caution!
+local NZombieInvisWallFix = CreateConVar("nz_linux_inviswall_collisions", 0, FCVAR_SERVER_CAN_EXECUTE, "Pushes players back when they get caught on invis walls (this can be helpful for Linux nZombies)")
+
+
+local function FixInvisWalls() -- ^
+	return (NZombieInvisWallFix and NZombieInvisWallFix:GetInt() > 0 and system.IsLinux() and gmod.GetGamemode().Name == "nZombies")
+end
 
 local function PlayerSpawned(ply)
     table.insert(ExcludedPlayers, ply:EntIndex())
@@ -105,34 +113,49 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
                 AUBlockOwnProp = ent:GetNWEntity("AUPropOwner") != ply
             end 
             
-            if (ent:IsScripted() and ply:BoundingRadius() - ent:BoundingRadius() > 0) then return end -- Stops triggering Auto Unstuck due to tiny entities
+            if (ent:IsScripted() and ply:BoundingRadius() - ent:BoundingRadius() > 0 
+			and (!FixInvisWalls() or FixInvisWalls() and ent:GetClass() != "invis_wall")) then return end -- Stops triggering Auto Unstuck due to tiny entities
+			
             if ent:GetCollisionGroup() != 20 and -- The ent can collide with the player that is stuck
             ent != ply and -- The ent is not the player that is stuck
             AUBlockOwnProp then return true end -- The ent is not owned by the player that is stuck (AutoUnstuck_If_PersonalEnt ConVar)
         end
     })
 
-    return tr.Hit
+    return tr
 end
 
 local function PlayerIsStuck(ply) 
-    -- Don't teleport players for being stuck while they are down:
-    if gmod.GetGamemode().Name == "nZombies" then
-        if ply:IsSpectating() then return false end
-        if !ply:GetNotDowned() then return false end
-        --if ply:GetNWBool("in_afterlife") then return false end
-    end
+    local trRes = TraceBoundingBox(ply)
 
-    if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
+	if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
+		-- Don't teleport players for being stuck while they are down:
+		if gmod.GetGamemode().Name == "nZombies" then
+			if ply:IsSpectating() then return false end
+			if !ply:GetNotDowned() then return false end
+			
+			if (FixInvisWalls()) then -- Linux nZombies has collision problems with invis_walls
+				if (trRes.Hit and IsValid(trRes.Entity) and trRes.Entity:GetClass() == "invis_wall") then
+					if (isvector(ply.NoInvisWallSpot)) then
+						ply:SetPos(ply.NoInvisWallSpot)
+					end
+				else
+					ply.NoInvisWallSpot = ply:GetPos()
+				end
+			end
+			
+			--if ply:GetNWBool("in_afterlife") then return false end
+		end
 
-    if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
-        if TraceBoundingBox(ply) then -- The player is blocked by something
-            return true
-        elseif (ply:IsOnGround()) then      
-            ply.aulastspot = ply:GetPos() -- They aren't stuck, this is their new last position
-            ply.aulastspotang = ply:GetAngles()
-        end
-    end
+		if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
+
+		if trRes.Hit then -- The player is blocked by something
+			return true
+		elseif (ply:IsOnGround()) then      
+			ply.aulastspot = ply:GetPos() -- They aren't stuck, this is their new last position
+			ply.aulastspotang = ply:GetAngles()
+		end
+	end
 end
 
 local AUPickTPSpot, AU_InvalidTPSpot -- Define at same time so they can call eachother
@@ -146,6 +169,7 @@ local function CheckIfStuck(ply)
     if PlayerIsStuck(ply) then
         local TimerName = string.format("AU_Tp%s", ply:UserID()) 
         if timer.Exists(TimerName) then return end
+		
         ply.LastAutoUnstuck = CurTime()
         ply:ChatPrint("[Auto Unstuck] has determined you're stuck, try moving...")                        
         
@@ -215,14 +239,14 @@ local function AUSendPlyToSpot(ply, spot)
     ply:ChatPrint("[Auto Unstuck] has teleported you out.")
     AnnounceTP(ply)
 
-    if gmod.GetGamemode().Name == "nZombies" then 
-        ply:SetTargetPriority(TARGET_PRIORITY_NONE)
-        timer.Simple(5, function()
-            if (IsValid(ply)) then
-                ply:SetTargetPriority(TARGET_PRIORITY_PLAYER)
-            end
-        end)
-    end
+    -- if gmod.GetGamemode().Name == "nZombies" then 
+    --     ply:SetTargetPriority(TARGET_PRIORITY_NONE)
+    --     timer.Simple(5, function()
+    --         if (IsValid(ply)) then
+    --             ply:SetTargetPriority(TARGET_PRIORITY_PLAYER)
+    --         end
+    --     end)
+    -- end
 end
 
 local function CheckNavForEnts(ply, pos)
@@ -293,7 +317,7 @@ end
 local function GetAvailableNav(ply) -- Gets the closest navmesh that the player WILL NOT get stuck at
     local newTbl = navmesh.GetAllNavAreas()
     local navs = table.sort(newTbl, function(a, b) 
-        return a:GetCenter():DistToSqr(ply:GetPos()) < b:GetCenter():DistToSqr(ply:GetPos()) and !TraceBoundingBox(ply, a:GetCenter())
+        return a:GetCenter():DistToSqr(ply:GetPos()) < b:GetCenter():DistToSqr(ply:GetPos()) and !TraceBoundingBox(ply, a:GetCenter().Hit)
     end)
 
     return newTbl[1]:GetCenter()
@@ -328,7 +352,7 @@ function AUPickTPSpot(ply)
 
     if TPNearStuckSpot:GetInt() >= 2 then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
         if (isvector(ply.aulastspot)) then
-            if (TraceBoundingBox(ply, ply.aulastspot)) then  --ply:GetPos():Distance(ply.aulastspot) <= 50
+            if (TraceBoundingBox(ply, ply.aulastspot).Hit) then  --ply:GetPos():Distance(ply.aulastspot) <= 50
                 AUSendPlyToSpot(ply, RandomTPSpot)
             return end
 
