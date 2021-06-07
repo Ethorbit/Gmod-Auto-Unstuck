@@ -4,7 +4,7 @@
 -------------------------------------------------
 local ToggleAddon = CreateConVar("AutoUnstuck_Enabled", 1, FCVAR_SERVER_CAN_EXECUTE, "Enables/Disables the Auto Unstuck addon")
 local AnnounceTPs = CreateConVar("AutoUnstuck_Announce", 1, FCVAR_SERVER_CAN_EXECUTE, "Announce to everyone in the server if a player is teleported for being stuck")
-local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 1, FCVAR_SERVER_CAN_EXECUTE, "1: Teleport to closest navigation mesh, 2: Teleport to last saved player location")
+local TPNearStuckSpot = CreateConVar("AutoUnstuck_TPNearSpot", 2, FCVAR_SERVER_CAN_EXECUTE, "1: Teleport to closest navigation mesh, 2: Teleport to last saved player location. (Will use 2 if no navmesh is loaded.)")
 local TpIfOwnProps = CreateConVar("AutoUnstuck_If_PersonalEnt", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck if someone is stuck in their own stuff (If on, players can easily abuse it to teleport themselves)")
 local TpIfAdmin = CreateConVar("AutoUnstuck_If_Admin", 1, FCVAR_SERVER_CAN_EXECUTE, "Auto Unstuck even if the they are an administrator")
 local TPNearNPCs = CreateConVar("AutoUnstuck_NearNPCs", 1, FCVAR_SERVER_CAN_EXECUTE, "Automatically unstuck players at an AutoUnstuck_TPEntityClass spot that isn't near NPCs")
@@ -19,8 +19,6 @@ local ExcludedPlayers = {}
 -- Special ConVar for nZombies server owners using Linux, I'm unsure if
 -- it was just my server with invis_wall collision problems, so use with caution!
 local NZombieInvisWallFix = CreateConVar("nz_linux_inviswall_collisions", 0, FCVAR_SERVER_CAN_EXECUTE, "Pushes players back when they get caught on invis walls (this can be helpful for Linux nZombies)")
-
-
 local function FixInvisWalls() -- ^
 	return (NZombieInvisWallFix and NZombieInvisWallFix:GetInt() > 0 and system.IsLinux() and gmod.GetGamemode().Name == "nZombies")
 end
@@ -53,10 +51,6 @@ end
 
 local function AUAddEnts()
     TPSpots = {} 
-
-    if TPNearStuckSpot:GetInt() == 1 and !navmesh.IsLoaded() then
-        print("[Auto Unstuck] There is no navigation mesh on this map! Do nav_generate to generate the nav mesh, you only need to do it once per map! Using TPEntityClass entities instead..")
-    end
 
     local TPClass = EntToTPTo:GetString() -- The AutoUnstuck_TPEntityClass ConVar
     local EntsWithTPClass = ents.FindByClass(TPClass)
@@ -125,9 +119,9 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
     return tr
 end
 
-local function PlayerIsStuck(ply) 
-    local trRes = TraceBoundingBox(ply)
-
+local function PlayerIsStuck(ply, pos) 
+    local trRes = TraceBoundingBox(ply, pos)
+    
 	if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
 		-- Don't teleport players for being stuck while they are down:
 		if gmod.GetGamemode().Name == "nZombies" then
@@ -329,7 +323,26 @@ function AUPickTPSpot(ply)
     
     if CurTime() < TpAwayFromNPCDelay then return end -- Only happens if AutoUnstuck_NearNPCs ConVar is on
     
-    if TPNearStuckSpot:GetInt() == 1 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot set to TP to nearest navmesh
+    -- AutoUnstuck_TPNearSpot ConVar is off
+    if TPNearStuckSpot:GetInt() <= 0 and navmesh.IsLoaded() then 
+        if table.Count(TPSpots) == 0 then -- This can happen if the lua file is reloaded at runtime
+            AUAddEnts() 
+            AUPickTPSpot(ply)
+        return end
+
+        if TPNearNPCs:GetInt() > 0 then -- AutoUnstuck_NearNPCs ConVar is on
+            AUSendPlyToSpot(ply, RandomTPSpot)
+        else
+            AUPickSpotAwayFromNPCs(ply)
+        end
+    return end
+
+    if TPNearStuckSpot:GetInt() == 1 and !navmesh.IsLoaded() then
+        print("[Auto Unstuck] You have AutoUnstuck_TPNearSpot set to 1 and there is no navigation mesh on this map! Using 2 instead.. Do nav_generate to generate the nav mesh.")
+    end
+
+    -- AutoUnstuck_TPNearSpot set to TP to nearest navmesh
+    if TPNearStuckSpot:GetInt() == 1 and navmesh.IsLoaded() then 
         --local ClosestNav = navmesh.GetNearestNavArea(ply:GetPos(), true, 10000000, false, false)
         ClosestNav = GetAvailableNav(ply)
 
@@ -346,11 +359,14 @@ function AUPickTPSpot(ply)
             else
                 AUSendPlyToSpot(ply, ClosestNav)
             end
-        --end   
-    end  
-    return end
+        --end  
+        end  
 
-    if TPNearStuckSpot:GetInt() >= 2 then -- AutoUnstuck_TPNearSpot set to TP to last saved player spot
+        return 
+    end
+
+    -- AutoUnstuck_TPNearSpot set to TP to last saved player spot (or there is no navmesh)
+    if !navmesh.IsLoaded() or TPNearStuckSpot:GetInt() >= 2 then 
         if (isvector(ply.aulastspot)) then
             if (TraceBoundingBox(ply, ply.aulastspot).Hit) then  --ply:GetPos():Distance(ply.aulastspot) <= 50
                 AUSendPlyToSpot(ply, RandomTPSpot)
@@ -372,19 +388,6 @@ function AUPickTPSpot(ply)
         else
             AUSendPlyToSpot(ply, RandomTPSpot)
             ply:ChatPrint("[Auto Unstuck] tried to teleport you to your last saved location, but there isn't one saved!")
-        end
-    end
-
-    if TPNearStuckSpot:GetInt() <= 0 and navmesh.IsLoaded() then -- AutoUnstuck_TPNearSpot ConVar is off
-        if table.Count(TPSpots) == 0 then -- This can happen if the lua file is reloaded at runtime
-            AUAddEnts() 
-            AUPickTPSpot(ply)
-        return end
-
-        if TPNearNPCs:GetInt() > 0 then -- AutoUnstuck_NearNPCs ConVar is on
-            AUSendPlyToSpot(ply, RandomTPSpot)
-        else
-            AUPickSpotAwayFromNPCs(ply)
         end
     end
 end
