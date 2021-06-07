@@ -144,7 +144,9 @@ local function PlayerIsStuck(ply, pos)
 		if table.HasValue(ExcludedPlayers, ply:EntIndex()) then return false end 
 
 		if trRes.Hit then -- The player is blocked by something
-			return true
+            local res = hook.Run("AU.CanHandlePlayer", ply)
+            if res == nil then res = true end
+			return res
 		elseif (ply:IsOnGround()) then      
 			ply.aulastspot = ply:GetPos() -- They aren't stuck, this is their new last position
 			ply.aulastspotang = ply:GetAngles()
@@ -165,7 +167,8 @@ local function CheckIfStuck(ply)
         if timer.Exists(TimerName) then return end
 		
         ply.LastAutoUnstuck = CurTime()
-        ply:ChatPrint("[Auto Unstuck] has determined you're stuck, try moving...")                        
+        ply:ChatPrint("[Auto Unstuck] has determined you're stuck, try moving...")   
+        hook.Run("AU.PlayerStuck", ply)                 
         
         timer.Create(TimerName, TimeBeforeTP:GetInt(), 1, function() -- Timer's time based on AutoUnstuck_TimeForTP ConVar
             if !ply:IsValid() then return end -- It's possible they could've left the server before the timer finished
@@ -226,13 +229,16 @@ local function AUSendPlyToSpot(ply, spot)
     else
         pos = spot:GetPos()
     end
-
+  
     TPdToSpot = pos + Vector(0,0,2)
-    ply:SetPos(pos + Vector(0,0,2)) -- up 2 on the z axis to fix spawning a tiny bit in the ground (map maker's fault)
+    ply:SetPos(TPdToSpot) -- up 2 on the z axis to fix spawning a tiny bit in the ground (map maker's fault)
     ply:SetEyeAngles(Angle(0,0,0)) -- Reset their view angles
     ply:ChatPrint("[Auto Unstuck] has teleported you out.")
+    hook.Run("AU.PlayerTeleported", ply, TPdToSpot) 
     AnnounceTP(ply)
 
+    -- -- Old nZombies code to disable zombie targetting on a player temporarily after teleported
+    -- -- You can uncomment if you want, but players can easily abuse this if they find a trigger spot
     -- if gmod.GetGamemode().Name == "nZombies" then 
     --     ply:SetTargetPriority(TARGET_PRIORITY_NONE)
     --     timer.Simple(5, function()
@@ -424,6 +430,7 @@ hook.Add("Tick", "AU_FindStuckPlayers", function()
                 if TPdToSpot == v:GetPos() then return end -- They aren't stuck anymore BECAUSE Auto Unstuck teleported them
                 timer.Remove(TimerName)
                 v:ChatPrint("[Auto Unstuck] You are no longer determined to be stuck.")
+                hook.Run("AU.PlayerNoLongerStuck", v) 
             end
     
             --if v:GetVelocity().x == 0 then -- Both entities are not moving
