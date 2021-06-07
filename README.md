@@ -8,7 +8,7 @@ When a player is detected as being stuck, Auto Unstuck will wait a few seconds (
 ## Console Commands:
 * AutoUnstuck_Enabled <0/1> 
 
-* AutoUnstuck_TPNearSpot <0/2> (2 by default) - On 1 Auto Unstuck will TP the player to the closest available navmesh, 2 will teleport the player to the last place they were NOT stuck at. (If there's no navmesh on the map, 2 will be used anyway)
+* [b]AutoUnstuck_TPNearSpot[/b] <0/2> (2 by default) - On 1 Auto Unstuck will TP the player to the closest available navmesh outside of obstruction, 2 will teleport the player to the last place they were NOT stuck at. (If there's no navmesh on the map, 2 will be used anyway)
 
 * AutoUnstuck_TPEntityClass <entity classname> (info_player_start by default ) - the entities' classname Auto Unstuck should pick randomly for players to teleport to when they are stuck
 
