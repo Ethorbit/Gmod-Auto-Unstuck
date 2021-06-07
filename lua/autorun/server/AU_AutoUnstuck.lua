@@ -310,13 +310,8 @@ end
 
 local function GetAvailableNav(ply) -- Gets the closest navmesh that the player WILL NOT get stuck at
     local newTbl = navmesh.GetAllNavAreas()
-   -- local done = false
-    local navs = table.sort(newTbl, function(a, b) 
-        -- if !done and TraceBoundingBox(ply, a:GetCenter()).Hit then
-        --     print(TraceBoundingBox(ply, a:GetCenter()).Entity)
-        --     done = true
-        -- end
 
+    local navs = table.sort(newTbl, function(a, b) 
         return a:GetCenter():DistToSqr(ply:GetPos()) < b:GetCenter():DistToSqr(ply:GetPos()) and !TraceBoundingBox(ply, a:GetCenter()).Hit
     end)
 
