@@ -12,6 +12,7 @@ local NPCDisallowDist = CreateConVar("AutoUnstuck_NPC_Distance", 500, FCVAR_SERV
 local IgnorePlayers = CreateConVar("AutoUnstuck_IgnorePlayers", 0, FCVAR_SERVER_CAN_EXECUTE, "Ignore players getting stuck in other players (If not then players can force teleports on people by noclipping inside them)")
 local TimeBeforeTP = CreateConVar("AutoUnstuck_TimeForTP", 3, FCVAR_SERVER_CAN_EXECUTE, "The time (in seconds) before the stuck player is teleported")
 local EntToTPTo = CreateConVar("AutoUnstuck_TPEntityClass", "info_player_start", FCVAR_SERVER_CAN_EXECUTE, "The entity classname to teleport the players to when they are stuck")
+local IgnoreNPCs = CreateConVar("AutoUnstuck_IgnoreNPCs", 0, FCVAR_SERVER_CAN_EXECUTE, "Whether or not to ignore detecting players inside of NPCs/Nextbots.")
 local TPSpots = {}
 local AU_OriginalTPClass = ""
 local ExcludedPlayers = {}
@@ -20,7 +21,7 @@ local ExcludedPlayers = {}
 -- it was just my server with invis_wall collision problems, so use with caution!
 local NZombieInvisWallFix = CreateConVar("nz_linux_inviswall_collisions", 0, FCVAR_SERVER_CAN_EXECUTE, "Pushes players back when they get caught on invis walls (this can be helpful for Linux nZombies)")
 local function FixInvisWalls() -- ^
-	return (NZombieInvisWallFix and NZombieInvisWallFix:GetInt() > 0 and system.IsLinux() and gmod.GetGamemode().Name == "nZombies")
+	return (NZombieInvisWallFix and NZombieInvisWallFix:GetInt() > 0 and system.IsLinux() and engine.ActiveGamemode() == "nzombies")
 end
 
 local function PlayerSpawned(ply)
@@ -98,7 +99,7 @@ local function TraceBoundingBox(ply, pos) -- Check if player is blocked using a 
         mask = MASK_PLAYERSOLID, -- Detects things like map clips
         filter = function(ent) -- Slow but necessary
             if IgnorePlayers:GetInt() > 0 and ent:IsPlayer() then return end -- The ent is a different player (AutoUnstuck_IgnorePlayers ConVar)
-            if ent:IsNPC() or ent.Type == "nextbot" then return true end
+            if IgnoreNPCs:GetInt() < 1 and (ent:IsNPC() or ent.Type == "nextbot") then return true end
 
             local AUBlockOwnProp = true
             if TpIfOwnProps:GetInt() > 0 then -- Allow player to get unstuck from their own entity (if AutoUnstuck_If_PersonalEnt ConVar is on)
@@ -122,9 +123,9 @@ end
 local function PlayerIsStuck(ply, pos) 
     local trRes = TraceBoundingBox(ply, pos)
     
-	if ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player is not flying through stuff
+	if ply:Alive() and ply:GetMoveType() != MOVETYPE_NOCLIP then -- Player alive and not flying through stuff
 		-- Don't teleport players for being stuck while they are down:
-		if gmod.GetGamemode().Name == "nZombies" then
+		if engine.ActiveGamemode() == "nzombies" then
 			if ply:IsSpectating() then return false end
 			if !ply:GetNotDowned() then return false end
 			
@@ -453,3 +454,20 @@ hook.Add("PlayerSpawnedRagdoll", "AU_PlySpawnedRagdoll", MakeEntOwnership)
 hook.Add("PlayerSpawnedVehicle", "AU_PlySpawnedVehicle", MakeEntOwnership2)
 hook.Add("PlayerSpawnedSENT", "AU_PlySpawnedSENT", MakeEntOwnership2)
 hook.Add("PlayerSpawnedNPC", "AU_PlySpawnedNPC", MakeEntOwnership2)
+
+-- Fix for respawning players teleporting to their last spot if they got stuck on spawn. This can cause issues with gamemodes like nZombies.
+hook.Add("PlayerDeath", "RemoveDeadPlayersUnStuckSpot", function(ply)
+    if IsValid(ply) then 
+        ply.aulastspot = nil 
+        ply.aulastspotang = nil
+    end 
+end)
+
+if engine.ActiveGamemode() == "nzombies" then 
+    hook.Add("OnPlayerDropOut", "RemoveDroppedOutPlayersUnStuckSpot", function(ply) 
+        if IsValid(ply) then 
+            ply.aulastspot = nil
+            ply.aulastspotang = nil
+        end 
+    end)
+end 
